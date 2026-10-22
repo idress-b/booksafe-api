@@ -1,36 +1,37 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { CreateResourceDto } from './dto/create-resource.dto.js';
 import { UpdateResourceDto } from './dto/update-resource.dto.js';
 import { Resource } from './entities/resource.entity.js';
 
 @Injectable()
 export class ResourcesService {
+  constructor(
+    @InjectRepository(Resource)
+    private readonly resourcesRepository: Repository<Resource>,
+  ) {}
 
-  private readonly resources: Resource[] = [];
-private nextId = 1;
+  async create(createResourceDto: CreateResourceDto): Promise<Resource> {
+    const resource = this.resourcesRepository.create(createResourceDto);
 
-create(createResourceDto: CreateResourceDto): Resource {
-  const resource: Resource = {
-    id: this.nextId++,
-    ...createResourceDto,
-  };
+    return this.resourcesRepository.save(resource);
+  }
 
-  this.resources.push(resource);
+  async findAll(): Promise<Resource[]> {
+    return this.resourcesRepository.find({
+      order: { id: 'ASC' },
+    });
+  }
 
-  return resource;
-}
+  async findOne(id: number): Promise<Resource> {
+    const resource = await this.resourcesRepository.findOneBy({ id });
 
-findAll(): Resource[] {
-  return this.resources;
-}
- 
-
-  findOne( id: number) {
-    const result = this.resources.find(x => x.id === id);
-    if(!result){
+    if (!resource) {
       throw new NotFoundException(`Resource with id ${id} not found`);
     }
-    return result;
+
+    return resource;
   }
 
   update(id: number, updateResourceDto: UpdateResourceDto) {
