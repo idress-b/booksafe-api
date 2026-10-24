@@ -5,9 +5,16 @@ import {
   ManyToOne,
   PrimaryGeneratedColumn,
   Column,
+  Exclusion,
 } from 'typeorm';
 import { Resource } from '../../resources/entities/resource.entity.js';
 
+@Exclusion(
+  `USING gist (
+    "resource_id" WITH =,
+    tstzrange("start_at", "end_at", '[)') WITH &&
+  )`,
+)
 @Entity({ name: 'reservations' })
 export class Reservation {
   @PrimaryGeneratedColumn()
