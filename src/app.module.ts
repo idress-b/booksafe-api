@@ -19,7 +19,7 @@ import { ReservationsModule } from './reservations/reservations.module.js';
       password: process.env.POSTGRES_PASSWORD,
       database: process.env.POSTGRES_DB,
       autoLoadEntities: true,
-      synchronize: true,
+      synchronize: false,
     }),
     ResourcesModule,
     ReservationsModule,
