@@ -1,114 +1,170 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# BookSafe API
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+API REST de réservation de ressources partagées : salles de réunion,
+véhicules et bureaux.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+Le projet répond à un problème métier simple, mais sensible : empêcher qu’une
+même ressource soit réservée deux fois sur des créneaux qui se chevauchent.
+BookSafe est conçu comme un projet portfolio NestJS, avec une attention
+particulière portée à la cohérence des données sous concurrence.
 
-## Description
+## Le point technique clé : zéro double réservation
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+La règle de non-chevauchement est garantie par PostgreSQL, pas seulement par
+une vérification applicative. La table `reservations` possède une contrainte
+d’exclusion GiST :
 
-## Project setup
-
-```bash
-$ npm install
+```sql
+EXCLUDE USING gist (
+  resource_id WITH =,
+  tstzrange(start_at, end_at, '[)') WITH &&
+)
 ```
 
-## Compile and run the project
+- `resource_id WITH =` limite la règle à une même ressource ;
+- `tstzrange(..., '[)')` représente un créneau avec début inclus et fin
+  exclue ;
+- `&&` détecte l’intersection entre deux créneaux.
+
+Ainsi, `09:00–10:00` et `10:00–11:00` sont autorisés, tandis que
+`09:00–10:00` et `09:30–10:30` sont refusés.
+
+Cette garantie reste fiable même si plusieurs requêtes arrivent simultanément :
+PostgreSQL accepte une réservation et refuse les autres. L’erreur SQLSTATE
+`23P01` (`exclusion_violation`) est traduite par l’API en `409 Conflict`.
+
+L’extension PostgreSQL `btree_gist` est requise pour combiner l’égalité sur la
+ressource et la plage temporelle dans l’index GiST. La migration initiale la
+crée avec `CREATE EXTENSION IF NOT EXISTS "btree_gist"`.
+
+## Stack
+
+- Node.js 24 LTS
+- NestJS 12, TypeScript strict et ESM
+- PostgreSQL 17 avec Docker Compose
+- TypeORM et migrations versionnées
+- Vitest
+- `class-validator` et `class-transformer`
+
+## Démarrage local
+
+### Prérequis
+
+- Node.js 24 LTS
+- Docker et Docker Compose
+
+### Installation
 
 ```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+npm install
+cp .env.example .env
+docker compose up -d
+npm run db:migration:run
+npm run start:dev
 ```
 
-## Run tests
+L’API écoute par défaut sur `http://localhost:3000`.
+
+Vérifier son état :
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+curl http://localhost:3000/health
 ```
 
-## Deployment
+> Ne versionnez jamais `.env`, `node_modules` ou `dist`.
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+## Configuration
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+Le fichier `.env` est ignoré par Git. Il doit contenir les variables suivantes :
+
+```dotenv
+POSTGRES_DB=booksafe
+POSTGRES_USER=booksafe
+POSTGRES_PASSWORD=change_me
+POSTGRES_PORT=5432
+```
+
+`POSTGRES_HOST` est optionnel et vaut `localhost` par défaut.
+
+## Endpoints disponibles
+
+| Méthode | Route | Description |
+| --- | --- | --- |
+| `GET` | `/health` | État de l’API |
+| `POST` | `/resources` | Crée une ressource |
+| `GET` | `/resources` | Liste les ressources |
+| `GET` | `/resources/:id` | Récupère une ressource |
+| `POST` | `/reservations` | Crée une réservation |
+| `GET` | `/reservations` | Liste les réservations |
+
+### Créer une ressource
 
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+curl -X POST http://localhost:3000/resources \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "Salle Atlas",
+    "type": "meeting_room",
+    "capacity": 8
+  }'
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+Les valeurs possibles pour `type` sont `meeting_room`, `vehicle` et `desk`.
 
-## Observability
+### Créer une réservation
 
-In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.
+```bash
+curl -X POST http://localhost:3000/reservations \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "resourceId": 1,
+    "startAt": "2026-10-25T09:00:00Z",
+    "endAt": "2026-10-25T10:00:00Z"
+  }'
+```
 
-[NestJS Observe](https://observe.nestjs.com) automatically instruments your NestJS application, giving you deep visibility into your system with minimal setup:
+Les dates sont validées et `startAt` doit être strictement antérieur à `endAt`.
+Une ressource inexistante retourne `404 Not Found` ; un chevauchement retourne
+`409 Conflict`.
 
-- **Distributed tracing:** Follow requests across services and understand how they flow through your system.
-- **Waterfall analysis:** Visualize request execution and identify slow operations, bottlenecks, and unexpected delays.
-- **Performance analysis:** Analyze application performance in real time and quickly pinpoint areas that need optimization.
-- **Metrics:** Track key application and infrastructure metrics to understand system health and performance trends.
-- **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
-- **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
-- **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
+## Migrations
 
-## Resources
+Le schéma n’est jamais synchronisé automatiquement :
+`synchronize: false`. Toute évolution de structure passe par une migration
+versionnée.
 
-Check out a few resources that may come in handy when working with NestJS:
+```bash
+# Voir l’état des migrations
+npm run db:migration:show
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Auto-instrument your application with [NestJS Observer](https://observer.nestjs.com). Distributed tracing, metrics, and logging made easy. Error tracking and performance monitoring for your NestJS applications.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+# Générer une migration après modification des entités
+npm run db:migration:generate -- src/database/migrations/DescriptiveName
 
-## Support
+# Appliquer les migrations en attente
+npm run db:migration:run
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+# Annuler la dernière migration appliquée
+npm run db:migration:revert
+```
 
-## Stay in touch
+`db:migration:revert` peut supprimer ou modifier des données selon le contenu
+de la migration : à utiliser avec prudence, en particulier en production.
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+## Tests et qualité
 
-## License
+```bash
+npm test
+npm run lint
+npm run build
+```
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+Les tests unitaires couvrent notamment la traduction de la violation
+d’exclusion PostgreSQL (`23P01`) en réponse HTTP `409`.
+
+## Évolutions prévues
+
+- Authentification et autorisation
+- Annulation et modification de réservations
+- Tests end-to-end avec PostgreSQL
+- Pagination et filtres de disponibilité
+- CI et déploiement
